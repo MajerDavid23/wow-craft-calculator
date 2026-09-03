@@ -7,7 +7,7 @@ import { firstValueFrom } from 'rxjs';
 export class BlizzardApiService {
   private readonly logger = new Logger(BlizzardApiService.name);
   private accessToken: string | null = null;
-  private readonly TRANQUILITY_BLOOM_ID = 236761; 
+  private readonly TRANQUILITY_BLOOM_ID = 236761; //236761  236767
 
   constructor(
     private readonly httpService: HttpService,
