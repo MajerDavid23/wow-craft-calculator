@@ -7,8 +7,6 @@ import { firstValueFrom } from 'rxjs';
 export class BlizzardApiService {
   private readonly logger = new Logger(BlizzardApiService.name);
   private accessToken: string | null = null;
-  private readonly TRANQUILITY_BLOOM_ID = 236761; //236761  236767
-
   constructor(
     private readonly httpService: HttpService,
     private readonly configService: ConfigService,
@@ -44,7 +42,7 @@ export class BlizzardApiService {
     }
   }
 
-  async getTranquilityBloomPrice(): Promise<number> {
+  async getItemPrices(itemIds: number[]): Promise<Record<number, number>> {
     const token = await this.getAccessToken();
     const region = this.configService.get<string>('BLIZZARD_REGION'); 
     
@@ -57,25 +55,30 @@ export class BlizzardApiService {
         })
       );
 
-      const itemAuctions = response.data.auctions.filter(
-        (auction: { item: { id: number; }; }) => auction.item.id === this.TRANQUILITY_BLOOM_ID
-      );
-
-      if (itemAuctions.length === 0) return 0; 
-
-      let lowestPriceCopper = itemAuctions[0].unit_price;
-      for (const auction of itemAuctions) {
-        if (auction.unit_price < lowestPriceCopper) {
-          lowestPriceCopper = auction.unit_price;
-        }
+      const prices: Record<number, number> = {};
+      for (const itemId of itemIds) {
+        const itemAuctions = response.data.auctions.filter(
+          (auction: { item: { id: number }; }) => auction.item.id === itemId,
+        );
+        const lowestPriceCopper = itemAuctions.reduce(
+          (lowest: number | undefined, auction: { unit_price: number }) =>
+            lowest === undefined || auction.unit_price < lowest
+              ? auction.unit_price
+              : lowest,
+          undefined,
+        );
+        prices[itemId] = (lowestPriceCopper ?? 0) / 10000;
       }
-
-      const lowestPriceGold = lowestPriceCopper / 10000;
-      return lowestPriceGold;
+      return prices;
 
     } catch (error) {
       this.logger.error('Hiba az aukciók letöltésekor', error);
       throw error;
     }
+  }
+
+  async getTranquilityBloomPrice(): Promise<number> {
+    const prices = await this.getItemPrices([236761]);
+    return prices[236761];
   }
 }
