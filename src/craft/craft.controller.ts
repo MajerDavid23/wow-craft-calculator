@@ -1,8 +1,9 @@
-import { Controller, Get, Post, Body, Param } from '@nestjs/common';
+import { Controller, Get, Post, Body, Param, UseGuards } from '@nestjs/common';
 import { CraftService } from './craft.service.js';
 import { CalculateProfitDto } from './dto/calculate-profit.dto.js';
 import { BlizzardApiService } from '../blizzard-api.service.js';
 import type { RecipeKey } from './recipes/index.js';
+import { RecipeGuard } from './guards/recipe.guard.js';
 
 @Controller('craft')
 export class CraftController {
@@ -22,6 +23,7 @@ export class CraftController {
   }
 
   @Post('recipes/:recipeKey/profit')
+  @UseGuards(RecipeGuard)
   calculateRecipeProfit(
     @Param('recipeKey') recipeKey: RecipeKey,
     @Body() dto: CalculateProfitDto,

@@ -4,10 +4,11 @@ import { ConfigModule } from '@nestjs/config';
 import { CraftController } from './craft.controller.js';
 import { CraftService } from './craft.service.js';
 import { BlizzardApiService } from '../blizzard-api.service.js';
+import { RecipeGuard } from './guards/recipe.guard.js';
 
 @Module({
   imports: [HttpModule, ConfigModule],
   controllers: [CraftController],
-  providers: [CraftService, BlizzardApiService]
+  providers: [CraftService, BlizzardApiService, RecipeGuard]
 })
 export class CraftModule {}
