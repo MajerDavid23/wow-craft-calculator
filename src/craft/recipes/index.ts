@@ -5,3 +5,5 @@ export const RECIPES = {
 } as const;
 
 export type RecipeKey = keyof typeof RECIPES;
+
+export type RecipeRank = 1 | 2;

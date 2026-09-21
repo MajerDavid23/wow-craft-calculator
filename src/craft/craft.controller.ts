@@ -28,7 +28,10 @@ export class CraftController {
     @Param('recipeKey') recipeKey: RecipeKey,
     @Body() dto: CalculateProfitDto,
   ) {
-    return this.craftService.calculateRecipeProfit(recipeKey, dto.quantity ?? 1);
+    return this.craftService.calculateRecipeProfit(recipeKey, dto.quantity ?? 1, {
+      outputRank: dto.outputRank as 1 | 2 | undefined,
+      materialRanks: dto.materialRanks,
+    });
   }
 
   @Get('price-test')

@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
 import { ConfigService } from '@nestjs/config';
 import { firstValueFrom } from 'rxjs';
+import { KafkaProducerService } from './kafka/kafka-producer.service.js';
 
 @Injectable()
 export class BlizzardApiService {
@@ -10,6 +11,7 @@ export class BlizzardApiService {
   constructor(
     private readonly httpService: HttpService,
     private readonly configService: ConfigService,
+    private readonly kafkaProducer: KafkaProducerService,
   ) {}
 
   async getAccessToken(): Promise<string> {
@@ -69,6 +71,14 @@ export class BlizzardApiService {
         );
         prices[itemId] = (lowestPriceCopper ?? 0) / 10000;
       }
+
+      const priceTopic = this.configService.get<string>('KAFKA_PRICE_TOPIC') ?? 'wow-craft.item-prices';
+      await this.kafkaProducer.publish(priceTopic, {
+        region,
+        fetchedAt: new Date().toISOString(),
+        prices: itemIds.map((itemId) => ({ itemId, priceGold: prices[itemId] })),
+      });
+
       return prices;
 
     } catch (error) {

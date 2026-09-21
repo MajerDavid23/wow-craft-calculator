@@ -5,9 +5,10 @@ import { CraftController } from './craft.controller.js';
 import { CraftService } from './craft.service.js';
 import { BlizzardApiService } from '../blizzard-api.service.js';
 import { RecipeGuard } from './guards/recipe.guard.js';
+import { KafkaModule } from '../kafka/kafka.module.js';
 
 @Module({
-  imports: [HttpModule, ConfigModule],
+  imports: [HttpModule, ConfigModule, KafkaModule],
   controllers: [CraftController],
   providers: [CraftService, BlizzardApiService, RecipeGuard]
 })
