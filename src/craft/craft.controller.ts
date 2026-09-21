@@ -4,12 +4,14 @@ import { CalculateProfitDto } from './dto/calculate-profit.dto.js';
 import { BlizzardApiService } from '../blizzard-api.service.js';
 import type { RecipeKey } from './recipes/index.js';
 import { RecipeGuard } from './guards/recipe.guard.js';
+import { PriceHistoryService } from '../kafka/price-history.service.js';
 
 @Controller('craft')
 export class CraftController {
   constructor(
     private readonly craftService: CraftService,
-    private readonly blizzardApi: BlizzardApiService
+    private readonly blizzardApi: BlizzardApiService,
+    private readonly priceHistory: PriceHistoryService,
   ) {}
 
   @Post('profit')
@@ -42,5 +44,10 @@ export class CraftController {
       item: 'Tranquility Bloom',
       lowestPriceGold: price
     };
+  }
+
+  @Get('prices')
+  getPriceHistory() {
+    return this.priceHistory.getHistory();
   }
 }

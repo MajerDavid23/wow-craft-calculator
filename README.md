@@ -10,6 +10,7 @@ A small NestJS API for estimating WoW crafting profit margins: it pulls live Auc
 - Lets you mix ranks *within* a single material (e.g. 2× Rank 2 Sunglass Vial + 3× Rank 1), not just pick one rank for the whole craft.
 - Folds an expected-value Multicraft bonus directly into revenue/profit, based on your own character's Multicraft %.
 - Publishes a price snapshot to Kafka every time it fetches AH prices, as an optional, non-blocking side channel (the API works fine with no broker running).
+- Keeps a small in-memory rolling history of recent prices per item, built by consuming that same Kafka topic, queryable via `GET /craft/prices`.
 
 ## Requirements
 
@@ -112,6 +113,19 @@ Standalone calculator that doesn't touch the Blizzard API — pass `salePrice`, 
 
 Sanity-check endpoint that fetches the live price of a single hardcoded item (Tranquility Bloom).
 
+### `GET /craft/prices`
+
+Returns the in-memory price history built from consuming the Kafka price-snapshot topic, keyed by item ID (up to the last 20 entries per item). Empty (`{}`) if Kafka isn't running or nothing's been published yet — see [Kafka](#kafka-optional) below.
+
+```json
+{
+  "236761": [
+    { "priceGold": 0.99, "fetchedAt": "2026-09-21T12:26:32.729Z" },
+    { "priceGold": 0.99, "fetchedAt": "2026-09-21T12:26:36.733Z" }
+  ]
+}
+```
+
 ## Adding a new recipe
 
 Recipes live in `src/craft/recipes/` (see `silvermoon-health-potion.recipe.ts` for the shape) and are registered in `src/craft/recipes/index.ts`. Each material and the output need an item ID **per rank**.
@@ -132,14 +146,16 @@ Resourcefulness is not implemented yet.
 
 ## Kafka (optional)
 
-Price snapshots are published to Kafka on every AH fetch, but the app works completely fine with no broker — connection/publish failures are caught and logged as a warning, never thrown.
+Price snapshots are published to Kafka on every AH fetch, and the app also consumes that same topic itself to build the in-memory history behind `GET /craft/prices`. None of this is required — the app works completely fine with no broker running; connection/publish/consume failures are all caught and logged as a warning, never thrown.
 
 To run it locally:
 
 ```bash
 docker compose up -d      # starts a single-node Kafka broker (KRaft mode) on localhost:9092
-npm run kafka:tail        # watches the wow-craft.item-prices topic and pretty-prints messages
+npm run kafka:tail        # (optional) watches the wow-craft.item-prices topic from a separate process and pretty-prints messages
 ```
+
+The in-app consumer (`PriceHistoryService`) starts automatically with the app — no extra step needed for `GET /craft/prices` to start populating once the broker is up. Its history is in-memory only (nothing persists to disk), and resets whenever the app restarts.
 
 ## Testing
 
@@ -156,6 +172,7 @@ src/
   blizzard-api.service.ts       # Blizzard OAuth + commodity price fetching
   kafka/
     kafka-producer.service.ts   # thin, failure-tolerant Kafka producer wrapper
+    price-history.service.ts    # consumes the price topic into an in-memory rolling window
   craft/
     craft.controller.ts         # HTTP routes
     craft.service.ts            # profit calculation logic (ranks, splits, Multicraft)
