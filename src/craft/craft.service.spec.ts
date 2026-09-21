@@ -193,4 +193,85 @@ describe('CraftService', () => {
       }),
     ).rejects.toThrow('Material "Sunglass Vial" has no rank 3');
   });
+
+  it('folds the expected-value multicraft bonus directly into revenue/profit', async () => {
+    const getItemPrices = vi.fn().mockResolvedValue({
+      241305: 100,
+      236761: 10,
+      240991: 8,
+    });
+    const recipeService = await buildService(getItemPrices);
+
+    // Base: 5 potions * 100g = 500 revenue, 100 materialCost. 34% multicraft chance
+    // (matching a real Alchemy character's stat) -> expected total items =
+    // 5 * (1 + 0.34*1.5) = 7.55, so revenue = 100*7.55 = 755, profit = 755-100 = 655.
+    // multicraftAmount = round(7.55-5) = 3 bonus potions, worth 100*3 = 300 profit.
+    await expect(
+      recipeService.calculateRecipeProfit('silvermoon-health-potion', 1, { multicraftChance: 34 }),
+    ).resolves.toEqual({
+      recipe: 'Silvermoon Health Potion',
+      outputRank: 1,
+      revenue: 755,
+      materialCost: 100,
+      profit: 655,
+      materials: [
+        { name: 'Tranquility Bloom', rank: 1, quantity: 6, itemId: 236761, unitPrice: 10, cost: 60 },
+        { name: 'Sunglass Vial', rank: 1, quantity: 5, itemId: 240991, unitPrice: 8, cost: 40 },
+      ],
+      multicraft: {
+        chancePercent: 34,
+        multicraftAmount: 3,
+        multicraftExtraProfit: 300,
+      },
+    });
+  });
+
+  it('scales the folded-in multicraft bonus with quantity, same as everything else', async () => {
+    const getItemPrices = vi.fn().mockResolvedValue({
+      241305: 100,
+      236761: 10,
+      240991: 8,
+    });
+    const recipeService = await buildService(getItemPrices);
+
+    // quantity: 10 crafts -> base items = 50, expected total = 50*1.51 = 75.5,
+    // multicraftAmount = round(75.5-50) = round(25.5) = 26.
+    await expect(
+      recipeService.calculateRecipeProfit('silvermoon-health-potion', 10, { multicraftChance: 34 }),
+    ).resolves.toMatchObject({
+      revenue: 7550,
+      multicraft: {
+        chancePercent: 34,
+        multicraftAmount: 26,
+        multicraftExtraProfit: 2600,
+      },
+    });
+  });
+
+  it('omits the multicraft breakdown and leaves revenue unchanged when no chance is given', async () => {
+    const getItemPrices = vi.fn().mockResolvedValue({
+      241305: 100,
+      236761: 10,
+      240991: 8,
+    });
+    const recipeService = await buildService(getItemPrices);
+
+    const result = await recipeService.calculateRecipeProfit('silvermoon-health-potion');
+
+    expect(result).not.toHaveProperty('multicraft');
+    expect(result.revenue).toBe(500);
+  });
+
+  it('rejects a multicraft chance outside 0-100', async () => {
+    const getItemPrices = vi.fn().mockResolvedValue({
+      241305: 100,
+      236761: 10,
+      240991: 8,
+    });
+    const recipeService = await buildService(getItemPrices);
+
+    await expect(
+      recipeService.calculateRecipeProfit('silvermoon-health-potion', 1, { multicraftChance: 150 }),
+    ).rejects.toThrow('multicraftChance must be between 0 and 100, got 150');
+  });
 });

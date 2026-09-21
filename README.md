@@ -1,114 +1,175 @@
-<p align="center">
-  <a href="http://nestjs.com/" target="blank"><img src="https://nestjs.com/img/logo-small.svg" width="120" alt="Nest Logo" /></a>
-</p>
+# WoW Craft Calculator
 
-[circleci-image]: https://img.shields.io/circleci/build/github/nestjs/nest/master?token=abc123def456
-[circleci-url]: https://circleci.com/gh/nestjs/nest
+A small NestJS API for estimating WoW crafting profit margins: it pulls live Auction House commodity prices from the Blizzard API and computes `revenue - material cost` for a recipe, with support for the two-quality-rank system introduced in WoW: Midnight and an expected-value Multicraft adjustment.
 
-  <p align="center">A progressive <a href="http://nodejs.org" target="_blank">Node.js</a> framework for building efficient and scalable server-side applications.</p>
-    <p align="center">
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/v/@nestjs/core.svg" alt="NPM Version" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/l/@nestjs/core.svg" alt="Package License" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/dm/@nestjs/common.svg" alt="NPM Downloads" /></a>
-<a href="https://circleci.com/gh/nestjs/nest" target="_blank"><img src="https://img.shields.io/circleci/build/github/nestjs/nest/master" alt="CircleCI" /></a>
-<a href="https://discord.gg/G7Qnnhy" target="_blank"><img src="https://img.shields.io/badge/discord-online-brightgreen.svg" alt="Discord"/></a>
-<a href="https://opencollective.com/nest#backer" target="_blank"><img src="https://opencollective.com/nest/backers/badge.svg" alt="Backers on Open Collective" /></a>
-<a href="https://opencollective.com/nest#sponsor" target="_blank"><img src="https://opencollective.com/nest/sponsors/badge.svg" alt="Sponsors on Open Collective" /></a>
-  <a href="https://paypal.me/kamilmysliwiec" target="_blank"><img src="https://img.shields.io/badge/Donate-PayPal-ff3f59.svg" alt="Donate us"/></a>
-    <a href="https://opencollective.com/nest#sponsor"  target="_blank"><img src="https://img.shields.io/badge/Support%20us-Open%20Collective-41B883.svg" alt="Support us"></a>
-  <a href="https://twitter.com/nestframework" target="_blank"><img src="https://img.shields.io/twitter/follow/nestframework.svg?style=social&label=Follow" alt="Follow us on Twitter"></a>
-</p>
-  <!--[![Backers on Open Collective](https://opencollective.com/nest/backers/badge.svg)](https://opencollective.com/nest#backer)
-  [![Sponsors on Open Collective](https://opencollective.com/nest/sponsors/badge.svg)](https://opencollective.com/nest#sponsor)-->
+## What it does
 
-## Description
+- Fetches live commodity prices from the Blizzard API (region-configurable).
+- Calculates profit for a recipe: revenue from the crafted item minus the cost of its reagents.
+- Models the 2 quality ranks (Rank 1 / Rank 2) that materials and finished crafts have — each rank is a distinct item ID on the Auction House, not just a quality flag.
+- Lets you mix ranks *within* a single material (e.g. 2× Rank 2 Sunglass Vial + 3× Rank 1), not just pick one rank for the whole craft.
+- Folds an expected-value Multicraft bonus directly into revenue/profit, based on your own character's Multicraft %.
+- Publishes a price snapshot to Kafka every time it fetches AH prices, as an optional, non-blocking side channel (the API works fine with no broker running).
 
-[Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
+## Requirements
 
-## Project setup
+- Node.js 24+
+- A Blizzard API client ID/secret — create one at [develop.battle.net](https://develop.battle.net/)
+- Docker (optional — only needed if you want to run the Kafka broker locally)
+
+## Setup
 
 ```bash
-$ npm install
+npm install
 ```
 
-## Compile and run the project
+Create a `.env` file in the project root:
+
+```
+BLIZZARD_CLIENT_ID=<your client id>
+BLIZZARD_CLIENT_SECRET=<your client secret>
+BLIZZARD_REGION=eu
+
+# optional - only used if you're running the Kafka broker
+KAFKA_BROKERS=localhost:9092
+KAFKA_PRICE_TOPIC=wow-craft.item-prices
+```
+
+Run it:
 
 ```bash
-# development
-$ npm run start
-
-# watch mode
-$ npm run start:dev
-
-# production mode
-$ npm run start:prod
+npm run start:dev
 ```
 
-## Run tests
+The API listens on `http://localhost:3000` (override with `PORT`).
+
+## API
+
+### `GET /craft/recipes`
+
+Lists available recipes, their valid output ranks, and each material's name/quantity/valid ranks — use this to know what to pass to `materialRanks`.
+
+### `POST /craft/recipes/:recipeKey/profit`
+
+Calculates profit for a recipe using live AH prices.
+
+**Body (all fields optional):**
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `quantity` | number | `1` | How many crafts to calculate for. Everything below scales with this. |
+| `outputRank` | `1` \| `2` | `1` | Which rank of the finished item to price for revenue. |
+| `materialRanks` | `{ [materialName]: { rank, quantity }[] }` | — | Per-material rank breakdown. Quantities for a material must sum to its total required amount (`recipe quantity × quantity`). Materials left out default to 100% Rank 1. |
+| `multicraftChance` | number (0–100) | — | Your Multicraft proc chance %. When given, the expected-value bonus (cost-free extra items) is folded directly into `revenue`/`profit`, and a `multicraft` breakdown is added to the response. |
+
+**Example — defaults (Rank 1 everything):**
+```json
+POST /craft/recipes/silvermoon-health-potion/profit
+{}
+```
+
+**Example — Rank 2 output, mixed-rank materials, your real Multicraft chance:**
+```json
+POST /craft/recipes/silvermoon-health-potion/profit
+{
+  "outputRank": 2,
+  "materialRanks": {
+    "Sunglass Vial": [
+      { "rank": 2, "quantity": 2 },
+      { "rank": 1, "quantity": 3 }
+    ]
+  },
+  "multicraftChance": 34
+}
+```
+
+**Response shape:**
+```json
+{
+  "recipe": "Silvermoon Health Potion",
+  "outputRank": 1,
+  "revenue": 21.06,
+  "multicraft": {
+    "chancePercent": 34,
+    "multicraftAmount": 3,
+    "multicraftExtraProfit": 8.37
+  },
+  "materialCost": 20.79,
+  "profit": 0.27,
+  "materials": [
+    { "name": "Tranquility Bloom", "rank": 1, "quantity": 6, "itemId": 236761, "unitPrice": 0.99, "cost": 5.94 },
+    { "name": "Sunglass Vial", "rank": 1, "quantity": 5, "itemId": 240991, "unitPrice": 2.97, "cost": 14.85 }
+  ]
+}
+```
+(`multicraft` is only present when `multicraftChance` was given; the bonus it describes is already included in `revenue`/`profit`, not on top of it.)
+
+### `POST /craft/profit`
+
+Standalone calculator that doesn't touch the Blizzard API — pass `salePrice`, `materialCost`, and `quantity` directly. Useful for a quick manual check.
+
+### `GET /craft/price-test`
+
+Sanity-check endpoint that fetches the live price of a single hardcoded item (Tranquility Bloom).
+
+## Adding a new recipe
+
+Recipes live in `src/craft/recipes/` (see `silvermoon-health-potion.recipe.ts` for the shape) and are registered in `src/craft/recipes/index.ts`. Each material and the output need an item ID **per rank**.
+
+To find rank item IDs: search `"<material name>" wowhead item id` for candidates, then confirm which candidate is which rank by price — **Rank 2 must price higher than Rank 1 for the same material**. Fetch both IDs from `/data/wow/auctions/commodities` (or check the in-game tooltip's "Rank" line) rather than trusting a third-party site's label at face value — that sanity check caught a real bug once already (a site had Sunglass Vial's ranks backwards).
+
+## The Multicraft math
+
+`multicraftChance` uses an expected-value formula sourced from community testing (not an official Blizzard formula): `1% Multicraft ≈ +1.5% expected output value`. Concretely:
+
+```
+expectedTotalItems = baseItems × (1 + multicraftChance/100 × 1.5)
+```
+
+This is an *average*, not a per-craft simulation — any single craft has real variance around it (a 34% chance doesn't mean "34% chance of exactly this many items"; it means a proc, which happens some fraction of crafts, averages a much bigger bonus, and the formula above is the expected value across many crafts). Your Multicraft/Resourcefulness rating-to-% conversion is also gear-dependent — read the actual % off your own profession window rather than guessing.
+
+Resourcefulness is not implemented yet.
+
+## Kafka (optional)
+
+Price snapshots are published to Kafka on every AH fetch, but the app works completely fine with no broker — connection/publish failures are caught and logged as a warning, never thrown.
+
+To run it locally:
 
 ```bash
-# unit tests
-$ npm run test
-
-# e2e tests
-$ npm run test:e2e
-
-# test coverage
-$ npm run test:cov
+docker compose up -d      # starts a single-node Kafka broker (KRaft mode) on localhost:9092
+npm run kafka:tail        # watches the wow-craft.item-prices topic and pretty-prints messages
 ```
 
-## Deployment
-
-When you're ready to deploy your NestJS application to production, there are some key steps you can take to ensure it runs as efficiently as possible. Check out the [deployment documentation](https://docs.nestjs.com/deployment) for more information.
-
-If you are looking for a cloud-based platform to deploy your NestJS application, check out [Mau](https://mau.nestjs.com), our official platform for deploying NestJS applications on AWS. Mau makes deployment straightforward and fast, requiring just a few simple steps:
+## Testing
 
 ```bash
-$ npm install -g @nestjs/mau
-$ mau deploy
+npm test          # unit tests (Blizzard API and Kafka are mocked)
+npm run test:e2e  # boots the full app
+npm run test:cov  # with coverage
 ```
 
-With Mau, you can deploy your application in just a few clicks, allowing you to focus on building features rather than managing infrastructure.
+## Project structure
 
-## Observability
+```
+src/
+  blizzard-api.service.ts       # Blizzard OAuth + commodity price fetching
+  kafka/
+    kafka-producer.service.ts   # thin, failure-tolerant Kafka producer wrapper
+  craft/
+    craft.controller.ts         # HTTP routes
+    craft.service.ts            # profit calculation logic (ranks, splits, Multicraft)
+    dto/calculate-profit.dto.ts
+    guards/recipe.guard.ts      # validates :recipeKey against known recipes
+    recipes/                    # recipe definitions (item IDs per rank)
+scripts/
+  kafka-tail.mjs                 # standalone consumer for manually watching the price topic
+docker-compose.yml               # local Kafka broker
+```
 
-In production applications, observability is essential for understanding how your system behaves, detecting issues early, and maintaining reliable performance.
+## Known limitations
 
-[NestJS Observe](https://observe.nestjs.com) automatically instruments your NestJS application, giving you deep visibility into your system with minimal setup:
-
-- **Distributed tracing:** Follow requests across services and understand how they flow through your system.
-- **Waterfall analysis:** Visualize request execution and identify slow operations, bottlenecks, and unexpected delays.
-- **Performance analysis:** Analyze application performance in real time and quickly pinpoint areas that need optimization.
-- **Metrics:** Track key application and infrastructure metrics to understand system health and performance trends.
-- **Logging:** Centralize and correlate logs with traces and other telemetry to make debugging easier.
-- **Error tracking:** Detect errors quickly and investigate their root causes with the surrounding context.
-- **SLA monitoring:** Track service-level objectives and identify when your application is approaching or exceeding defined thresholds.
-- **Alarms and alerts:** Set up alerts for critical errors, performance degradation, SLA violations, and other anomalies so your team can react quickly.
-
-## Resources
-
-Check out a few resources that may come in handy when working with NestJS:
-
-- Visit the [NestJS Documentation](https://docs.nestjs.com) to learn more about the framework.
-- For questions and support, please visit our [Discord channel](https://discord.gg/G7Qnnhy).
-- To dive deeper and get more hands-on experience, check out our official video [courses](https://courses.nestjs.com/).
-- Deploy your application to AWS with the help of [NestJS Mau](https://mau.nestjs.com) in just a few clicks.
-- Auto-instrument your application with [NestJS Observer](https://observer.nestjs.com). Distributed tracing, metrics, and logging made easy. Error tracking and performance monitoring for your NestJS applications.
-- Visualize your application graph and interact with the NestJS application in real-time using [NestJS Devtools](https://devtools.nestjs.com).
-- Need help with your project (part-time to full-time)? Check out our official [enterprise support](https://enterprise.nestjs.com).
-- To stay in the loop and get updates, follow us on [X](https://x.com/nestframework) and [LinkedIn](https://linkedin.com/company/nestjs).
-- Looking for a job, or have a job to offer? Check out our official [Jobs board](https://jobs.nestjs.com).
-
-## Support
-
-Nest is an MIT-licensed open source project. It can grow thanks to the sponsors and support by the amazing backers. If you'd like to join them, please [read more here](https://docs.nestjs.com/support).
-
-## Stay in touch
-
-- Author - [Kamil Myśliwiec](https://twitter.com/kammysliwiec)
-- Website - [https://nestjs.com](https://nestjs.com/)
-- Twitter - [@nestframework](https://twitter.com/nestframework)
-
-## License
-
-Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).
+- Only one recipe exists so far (Silvermoon Health Potion) — it's a proof of concept for the rank/split/Multicraft mechanics, not a full recipe database.
+- Targets WoW: Midnight, which was still in beta/PTR at the time this was built — item IDs, prices, and the Multicraft formula above may drift before/after release.
+- Resourcefulness isn't factored in yet, only Multicraft.
+- The Blizzard OAuth token is cached in memory for the process lifetime with no expiry/refresh handling.

@@ -6,6 +6,15 @@ import { RECIPES, RecipeKey, RecipeRank } from './recipes/index.js';
 export interface RecipeProfitOptions {
 	outputRank?: RecipeRank;
 	materialRanks?: Record<string, MaterialRankAllocationDto[]>;
+	multicraftChance?: number;
+}
+
+export interface MulticraftBreakdown {
+	chancePercent: number;
+	/** Expected number of cost-free bonus items already folded into `revenue`/`profit` above, for this request's `quantity`. */
+	multicraftAmount: number;
+	/** Profit represented by those bonus items (already included in `profit` above - shown separately for visibility). */
+	multicraftExtraProfit: number;
 }
 
 export interface PricedMaterialLine {
@@ -82,7 +91,30 @@ export class CraftService {
 		const prices = await this.blizzardApi.getItemPrices(itemIds);
 
 		const outputPrice = prices[outputItemId] ?? 0;
-		const revenue = outputPrice * recipe.output.quantity * quantity;
+		const baseItems = recipe.output.quantity * quantity;
+
+		let totalItems = baseItems;
+		let multicraft: MulticraftBreakdown | undefined;
+		if (options.multicraftChance !== undefined) {
+			const chancePercent = options.multicraftChance;
+			if (chancePercent < 0 || chancePercent > 100) {
+				throw new BadRequestException(`multicraftChance must be between 0 and 100, got ${chancePercent}`);
+			}
+
+			// Multicraft only affects the output side (bonus items cost no extra reagents):
+			// expected value multiplier = 1 + (chance × 1.5), per community-derived testing
+			// (thelazygoldmaker.com's crafting stats breakdown). Every bonus item sells at
+			// the same price as a normal one, so that multiplier applies to item count too.
+			totalItems = baseItems * (1 + (chancePercent / 100) * 1.5);
+			const multicraftAmount = Math.round(totalItems - baseItems);
+			multicraft = {
+				chancePercent,
+				multicraftAmount,
+				multicraftExtraProfit: Math.round(outputPrice * multicraftAmount * 100) / 100,
+			};
+		}
+
+		const revenue = outputPrice * totalItems;
 
 		const pricedMaterials: PricedMaterialLine[] = materialLines.map((line) => {
 			const unitPrice = prices[line.itemId] ?? 0;
@@ -94,6 +126,7 @@ export class CraftService {
 			recipe: recipe.name,
 			outputRank,
 			revenue,
+			...(multicraft ? { multicraft } : {}),
 			materialCost,
 			profit: revenue - materialCost,
 			materials: pricedMaterials,

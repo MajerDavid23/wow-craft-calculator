@@ -31,6 +31,7 @@ export class CraftController {
     return this.craftService.calculateRecipeProfit(recipeKey, dto.quantity ?? 1, {
       outputRank: dto.outputRank as 1 | 2 | undefined,
       materialRanks: dto.materialRanks,
+      multicraftChance: dto.multicraftChance,
     });
   }
 

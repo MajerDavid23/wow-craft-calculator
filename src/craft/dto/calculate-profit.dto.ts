@@ -18,4 +18,12 @@ export class CalculateProfitDto {
    * for their full required amount.
    */
   materialRanks?: Record<string, MaterialRankAllocationDto[]>;
+  /**
+   * Multicraft proc chance as a percentage (e.g. 34 for 34%). When provided, the
+   * expected value of Multicraft's cost-free bonus items is folded directly into
+   * `revenue`/`profit` (scaled by `quantity` like everything else), and a `multicraft`
+   * breakdown is included showing how many bonus items and how much of that profit
+   * came from Multicraft specifically.
+   */
+  multicraftChance?: number;
 }
